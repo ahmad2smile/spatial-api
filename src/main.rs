@@ -2,11 +2,18 @@ use std::time::Duration;
 
 use axum::{Router, routing::get};
 use sqlx::postgres::PgPoolOptions;
+use utoipa::OpenApi;
+use utoipa_swagger_ui::SwaggerUi;
 
+use crate::sensor::api;
 use crate::sensor::api::sensor_api;
 
 mod sensor;
 mod utils;
+
+#[derive(OpenApi)]
+#[openapi(paths(api::post_sensors, api::get_sensor, api::put_sensor, api::post_nearby))]
+struct ApiDoc;
 
 #[tokio::main]
 async fn main() {
@@ -24,6 +31,7 @@ async fn main() {
     // build our application with a single route
     let app = Router::new()
         .route("/healthz", get(|| async { "Healthy" }))
+        .merge(SwaggerUi::new("/swagger-ui").url("/api-docs/openapi.json", ApiDoc::openapi()))
         .merge(sensor_api(pool));
 
     // run our app with hyper, listening globally on port 3000

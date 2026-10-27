@@ -1,9 +1,10 @@
 use axum::{http::StatusCode, response::IntoResponse};
 use sqlx::{error::ErrorKind, postgres::PgDatabaseError};
+use utoipa::ToSchema;
 
 use crate::utils::errors::ServiceErr::{Conflict, Database, NotFound, Validation};
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, thiserror::Error, ToSchema)]
 pub enum ServiceErr {
     #[error("Entity not found with value: {0}.")]
     NotFound(String),
@@ -15,6 +16,7 @@ pub enum ServiceErr {
     Conflict(String),
 
     #[error("Something went wrong with data handling, please try again.")]
+    #[schema(value_type = String)]
     Database(#[source] sqlx::Error),
 }
 

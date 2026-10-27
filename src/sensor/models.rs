@@ -2,8 +2,9 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 use sqlx::prelude::FromRow;
+use utoipa::ToSchema;
 
-#[derive(Debug, Clone, Serialize, FromRow)]
+#[derive(Debug, Clone, Serialize, FromRow, ToSchema)]
 pub struct Sensor {
     name: String,
     lat: f64,
@@ -11,13 +12,14 @@ pub struct Sensor {
 }
 
 #[derive(Debug, Clone, FromRow)]
+#[allow(dead_code)]
 pub struct Tag {
     sensor: String,
     name: String,
     value: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct SensorDto {
     pub name: String,
     pub lat: f64,
@@ -36,14 +38,14 @@ impl SensorDto {
     }
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, ToSchema)]
 pub struct SensorUpdateDto {
     pub lat: f64,
     pub long: f64,
     pub tags: BTreeMap<String, String>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, ToSchema)]
 pub struct SensorNearbyDto {
     pub lat: f64,
     pub long: f64,

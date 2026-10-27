@@ -4,16 +4,14 @@ use axum::{
     Json, Router,
     extract::{Path, State},
     http::StatusCode,
+    response::IntoResponse,
     routing::{get, post},
 };
 use sqlx::PgPool;
 
-use crate::{
-    sensor::{
-        models::{SensorDto, SensorNearbyDto, SensorUpdateDto},
-        service::SensorService,
-    },
-    utils::errors,
+use crate::sensor::{
+    models::{SensorDto, SensorNearbyDto, SensorUpdateDto},
+    service::SensorService,
 };
 
 pub fn sensor_api(pool: PgPool) -> Router {
@@ -34,7 +32,7 @@ pub fn sensor_api(pool: PgPool) -> Router {
 pub async fn post_sensors(
     State(srv): State<Arc<SensorService>>,
     Json(dto): Json<SensorDto>,
-) -> Result<StatusCode, errors::ServiceErr> {
+) -> impl IntoResponse {
     srv.create(&dto).await.map(|_| StatusCode::CREATED)
 }
 
@@ -51,7 +49,7 @@ pub async fn post_sensors(
 pub async fn get_sensor(
     State(srv): State<Arc<SensorService>>,
     Path(name): Path<String>,
-) -> Result<Json<SensorDto>, errors::ServiceErr> {
+) -> impl IntoResponse {
     srv.get(&name).await.map(Json)
 }
 
@@ -69,7 +67,7 @@ pub async fn put_sensor(
     State(srv): State<Arc<SensorService>>,
     Path(name): Path<String>,
     Json(dto): Json<SensorUpdateDto>,
-) -> Result<StatusCode, errors::ServiceErr> {
+) -> impl IntoResponse {
     srv.update(&name, &dto).await.map(|_| StatusCode::OK)
 }
 
@@ -83,6 +81,6 @@ pub async fn put_sensor(
 pub async fn post_nearby(
     State(srv): State<Arc<SensorService>>,
     Json(dto): Json<SensorNearbyDto>,
-) -> Result<Json<super::models::SensorDto>, errors::ServiceErr> {
+) -> impl IntoResponse {
     srv.nearby(dto.lat, dto.long).await.map(Json)
 }

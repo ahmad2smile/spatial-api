@@ -83,6 +83,6 @@ pub async fn put_sensor(
 pub async fn post_nearby(
     State(srv): State<Arc<SensorService>>,
     Json(dto): Json<SensorNearbyDto>,
-) -> Result<Json<super::models::Sensor>, errors::ServiceErr> {
+) -> Result<Json<super::models::SensorDto>, errors::ServiceErr> {
     srv.nearby(dto.lat, dto.long).await.map(Json)
 }

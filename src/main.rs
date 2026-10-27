@@ -5,11 +5,8 @@ use sqlx::postgres::PgPoolOptions;
 use utoipa::OpenApi;
 use utoipa_swagger_ui::SwaggerUi;
 
-use crate::sensor::api;
-use crate::sensor::api::sensor_api;
-
-mod sensor;
-mod utils;
+use spatial::sensor::api;
+use spatial::sensor::api::sensor_api;
 
 #[derive(OpenApi)]
 #[openapi(paths(api::post_sensors, api::get_sensor, api::put_sensor, api::post_nearby))]

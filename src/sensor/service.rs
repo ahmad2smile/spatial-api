@@ -91,19 +91,26 @@ impl SensorService {
             self.create_tags(&name, &dto.tags).execute(&mut *tx).await?;
         }
 
+        tx.commit().await?;
+
         Ok(())
     }
 
-    pub async fn nearby(&self, lat: f64, long: f64) -> ServiceResult<Sensor> {
+    pub async fn nearby(&self, lat: f64, long: f64) -> ServiceResult<SensorDto> {
         let sensor: Sensor = sqlx::query_as(
             "SELECT * FROM sensors
             ORDER BY position <-> ST_SetSRID(ST_MakePoint($1, $2), 4326)::geography LIMIT 1",
         )
+        .bind(long) // For MakePoint, X = $1
         .bind(lat)
-        .bind(long)
         .fetch_one(&self.pool)
         .await?;
 
-        Ok(sensor)
+        let tags: Vec<Tag> = sqlx::query_as("SELECT * FROM tags WHERE sensor = $1")
+            .bind(&sensor.name)
+            .fetch_all(&self.pool)
+            .await?;
+
+        Ok(SensorDto::from(sensor, tags))
     }
 }

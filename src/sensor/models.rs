@@ -6,7 +6,7 @@ use utoipa::ToSchema;
 
 #[derive(Debug, Clone, Serialize, FromRow, ToSchema)]
 pub struct Sensor {
-    name: String,
+    pub name: String,
     lat: f64,
     long: f64,
 }
@@ -19,7 +19,7 @@ pub struct Tag {
     value: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[derive(PartialEq, Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct SensorDto {
     pub name: String,
     pub lat: f64,

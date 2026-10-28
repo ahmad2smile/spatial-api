@@ -15,7 +15,9 @@ tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 utoipa = { version = "6.0.0", features = ["axum_extras"] }
 utoipa-swagger-ui = { version = "10.0.2", features = ["axum"] }
+validator = { version = "0.21.0", features = ["derive"] }
 
 [dev-dependencies]
+rstest = "0.28.0"
 testcontainers = "0.28.0"
 tower = { version = "0.5.3", features = ["util"] }

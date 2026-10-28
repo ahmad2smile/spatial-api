@@ -8,10 +8,14 @@ use axum::{
     routing::{get, post},
 };
 use sqlx::PgPool;
+use validator::ValidateLength;
 
-use crate::sensor::{
-    models::{SensorDto, SensorNearbyDto, SensorUpdateDto},
-    service::SensorService,
+use crate::{
+    sensor::{
+        models::{SensorDto, SensorNearbyDto, SensorUpdateDto},
+        service::SensorService,
+    },
+    utils::validation::ValidatedJson,
 };
 
 pub fn sensor_api(pool: PgPool) -> Router {
@@ -25,13 +29,14 @@ pub fn sensor_api(pool: PgPool) -> Router {
 #[utoipa::path(
         post,
         path = "/sensors",
+        request_body = SensorDto,
         responses(
             (status = 201, description = "Sensor created"),
         )
     )]
 pub async fn post_sensors(
     State(srv): State<Arc<SensorService>>,
-    Json(dto): Json<SensorDto>,
+    ValidatedJson(dto): ValidatedJson<SensorDto>,
 ) -> impl IntoResponse {
     srv.create(&dto).await.map(|_| StatusCode::CREATED)
 }
@@ -46,16 +51,20 @@ pub async fn post_sensors(
             ("name" = String, Path, description = "Unique sensor name"),
         )
     )]
-pub async fn get_sensor(
-    State(srv): State<Arc<SensorService>>,
-    Path(name): Path<String>,
-) -> impl IntoResponse {
-    srv.get(&name).await.map(Json)
+pub async fn get_sensor(State(srv): State<Arc<SensorService>>, Path(name): Path<String>) -> impl IntoResponse {
+    if !name.validate_length(Some(1), Some(200), None) {
+        tracing::debug!("Name validation failed for get_sensor with value: {}", name);
+
+        return Err((StatusCode::BAD_REQUEST, "Name must be between 1 and 200 chars"));
+    }
+
+    Ok(srv.get(&name).await.map(Json))
 }
 
 #[utoipa::path(
         put,
         path = "/sensors/{name}",
+        request_body = SensorUpdateDto,
         responses(
             (status = 200, description = "Sensor updated"),
         ),
@@ -66,7 +75,7 @@ pub async fn get_sensor(
 pub async fn put_sensor(
     State(srv): State<Arc<SensorService>>,
     Path(name): Path<String>,
-    Json(dto): Json<SensorUpdateDto>,
+    ValidatedJson(dto): ValidatedJson<SensorUpdateDto>,
 ) -> impl IntoResponse {
     srv.update(&name, &dto).await.map(|_| StatusCode::OK)
 }
@@ -74,13 +83,134 @@ pub async fn put_sensor(
 #[utoipa::path(
         post,
         path = "/sensors/nearby",
+        request_body = SensorNearbyDto,
         responses(
             (status = 200, description = "Nearby Sensor found"),
         )
     )]
 pub async fn post_nearby(
     State(srv): State<Arc<SensorService>>,
-    Json(dto): Json<SensorNearbyDto>,
+    ValidatedJson(dto): ValidatedJson<SensorNearbyDto>,
 ) -> impl IntoResponse {
     srv.nearby(dto.lat, dto.long).await.map(Json)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::{
+        body::{Body, to_bytes},
+        http::{Request, Response},
+    };
+    use rstest::rstest;
+    use tower::ServiceExt;
+
+    #[rstest]
+    #[case(&"a".repeat(201), false, "Name must be between 1 and 200 chars")]
+    #[case(&"".repeat(201), false, "")] // 404, since name param can't be picked from empty
+    #[case(&" ".repeat(1), true, "")] // http::Error(InvalidUri(InvalidUriChar))
+    #[case(&" ".repeat(1_000_000), true, "")] // http::Error(InvalidUri(TooLong))
+    #[case(&"a".repeat(1_000_000), true, "")] // http::Error(InvalidUri(TooLong))
+    #[tokio::test]
+    async fn test_get_sensor(#[case] name: &str, #[case] invalid_req: bool, #[case] err: &str) {
+        let req = Request::get(format!("/sensors/{name}")).body(Body::empty());
+
+        if invalid_req {
+            assert_eq!(req.is_err(), true);
+            return;
+        }
+
+        let response = sensor_api(PgPool::connect_lazy("postgres://mock:mock@localhost/mock").unwrap())
+            .oneshot(req.unwrap())
+            .await
+            .unwrap();
+
+        assert!(response.status().as_u16() > 399);
+        assert_eq!(get_body_string(response).await, err);
+    }
+
+    #[rstest]
+    #[case(&"a".repeat(201), 0.0, 0.0, "Input validation error: [name: Must be between 1 and 200]")]
+    #[case("", 0.0, 0.0, "Input validation error: [name: Must be between 1 and 200]")]
+    #[case(
+        "a",
+        f64::MAX,
+        0.0,
+        "Input validation error: [lat: Must be between -90deg and 90deg]"
+    )]
+    #[case("a", -90.1, 0.0, "Input validation error: [lat: Must be between -90deg and 90deg]")]
+    #[case(
+        "a",
+        0.0,
+        f64::MAX,
+        "Input validation error: [long: Must be between -180deg and 180deg]"
+    )]
+    #[case("a", 0.0, -180.1, "Input validation error: [long: Must be between -180deg and 180deg]")]
+    #[tokio::test]
+    async fn test_post_sensors(#[case] name: &str, #[case] lat: f64, #[case] long: f64, #[case] err: &str) {
+        let dto = SensorDto {
+            name: name.to_string(),
+            lat,
+            long,
+            tags: Default::default(),
+        };
+        let req = Request::post("/sensors")
+            .header("content-type", "application/json")
+            .body(Body::from(serde_json::to_string(&dto).unwrap()));
+
+        let response = sensor_api(PgPool::connect_lazy("postgres://mock:mock@localhost/mock").unwrap())
+            .oneshot(req.unwrap())
+            .await
+            .unwrap();
+
+        assert!(response.status().as_u16() > 399);
+        assert_eq!(get_body_string(response).await, err);
+    }
+
+    #[rstest]
+    #[case(f64::MAX, 0.0, "Input validation error: [lat: Must be between -90deg and 90deg]")]
+    #[case(-90.1, 0.0, "Input validation error: [lat: Must be between -90deg and 90deg]")]
+    #[case(0.0, f64::MAX, "Input validation error: [long: Must be between -180deg and 180deg]")]
+    #[case(0.0, -180.1, "Input validation error: [long: Must be between -180deg and 180deg]")]
+    #[tokio::test]
+    async fn test_put_sensor(#[case] lat: f64, #[case] long: f64, #[case] err: &str) {
+        let body = serde_json::json!({ "lat": lat, "long": long, "tags": {"a": "1"} });
+        let req = Request::put("/sensors/a")
+            .header("content-type", "application/json")
+            .body(Body::from(body.to_string()));
+
+        let response = sensor_api(PgPool::connect_lazy("postgres://mock:mock@localhost/mock").unwrap())
+            .oneshot(req.unwrap())
+            .await
+            .unwrap();
+
+        assert!(response.status().as_u16() > 399);
+        assert_eq!(get_body_string(response).await, err);
+    }
+
+    #[rstest]
+    #[case(f64::MAX, 0.0, "Input validation error: [lat: Must be between -90deg and 90deg]")]
+    #[case(-90.1, 0.0, "Input validation error: [lat: Must be between -90deg and 90deg]")]
+    #[case(0.0, f64::MAX, "Input validation error: [long: Must be between -180deg and 180deg]")]
+    #[case(0.0, -180.1, "Input validation error: [long: Must be between -180deg and 180deg]")]
+    #[tokio::test]
+    async fn test_post_nearby(#[case] lat: f64, #[case] long: f64, #[case] err: &str) {
+        let body = serde_json::json!({ "lat": lat, "long": long });
+        let req = Request::post("/sensors/nearby")
+            .header("content-type", "application/json")
+            .body(Body::from(body.to_string()));
+
+        let response = sensor_api(PgPool::connect_lazy("postgres://mock:mock@localhost/mock").unwrap())
+            .oneshot(req.unwrap())
+            .await
+            .unwrap();
+
+        assert!(response.status().as_u16() > 399);
+        assert_eq!(get_body_string(response).await, err);
+    }
+
+    async fn get_body_string(res: Response<Body>) -> String {
+        let body = to_bytes(res.into_body(), usize::MAX).await.unwrap();
+        String::from_utf8(body.to_vec()).unwrap()
+    }
 }

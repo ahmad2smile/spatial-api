@@ -1,6 +1,12 @@
-use axum::{http::StatusCode, response::IntoResponse};
+use axum::{
+    extract::rejection::JsonRejection,
+    http::{StatusCode, header::CONTENT_TYPE},
+    response::IntoResponse,
+};
+use serde_json::json;
 use sqlx::{error::ErrorKind, postgres::PgDatabaseError};
 use utoipa::ToSchema;
+use validator::ValidationErrors;
 
 use crate::utils::errors::ServiceErr::{Conflict, Database, NotFound, Validation};
 
@@ -12,12 +18,20 @@ pub enum ServiceErr {
     #[error("Invalid value: {0}.")]
     Validation(String),
 
+    #[error(transparent)]
+    #[schema(value_type = Object)]
+    RequestValidation(#[from] ValidationErrors),
+
     #[error("Already exists: {0}.")]
     Conflict(String),
 
     #[error("Something went wrong with data handling, please try again.")]
     #[schema(value_type = String)]
     Database(#[source] sqlx::Error),
+
+    #[error(transparent)]
+    #[schema(value_type = Object)]
+    AxumJsonRejection(#[from] JsonRejection),
 }
 
 pub type ServiceResult<T> = Result<T, ServiceErr>;
@@ -59,18 +73,25 @@ impl IntoResponse for ServiceErr {
             NotFound(_) => StatusCode::NOT_FOUND,
             Validation(_) => StatusCode::BAD_REQUEST,
             Conflict(_) => StatusCode::CONFLICT,
+            ServiceErr::RequestValidation(_) | ServiceErr::AxumJsonRejection(_) => StatusCode::BAD_REQUEST,
             Database(err) => {
                 tracing::error!(error = ?err, "Database error");
 
                 StatusCode::INTERNAL_SERVER_ERROR
             }
         };
-        let msg = self.to_string();
+
+        let json_err = json!({
+            "title": status.canonical_reason().unwrap_or("Unknown"),
+            "status": status.as_u16(),
+            "detail": self.to_string()
+        })
+        .to_string();
 
         if status.is_client_error() {
-            tracing::debug!(error = %msg, status = %status, "Client error");
+            tracing::debug!(error = %json_err, status = %status, "Client error");
         }
 
-        (status, msg).into_response()
+        (status, [(CONTENT_TYPE, "application/problem+json")], json_err).into_response()
     }
 }

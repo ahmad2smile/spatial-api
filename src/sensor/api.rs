@@ -15,7 +15,7 @@ use crate::{
         models::{SensorDto, SensorNearbyDto, SensorUpdateDto},
         service::SensorService,
     },
-    utils::validation::ValidatedJson,
+    utils::{errors::ServiceErr, validation::ValidatedJson},
 };
 
 pub fn sensor_api(pool: PgPool) -> Router {
@@ -55,10 +55,10 @@ pub async fn get_sensor(State(srv): State<Arc<SensorService>>, Path(name): Path<
     if !name.validate_length(Some(1), Some(200), None) {
         tracing::debug!("Name validation failed for get_sensor with value: {}", name);
 
-        return Err((StatusCode::BAD_REQUEST, "Name must be between 1 and 200 chars"));
+        return ServiceErr::Validation("Name must be between 1 and 200 chars".into()).into_response();
     }
 
-    Ok(srv.get(&name).await.map(Json))
+    srv.get(&name).await.map(Json).into_response()
 }
 
 #[utoipa::path(
@@ -106,13 +106,13 @@ mod tests {
     use tower::ServiceExt;
 
     #[rstest]
-    #[case(&"a".repeat(201), false, "Name must be between 1 and 200 chars")]
-    #[case(&"".repeat(201), false, "")] // 404, since name param can't be picked from empty
-    #[case(&" ".repeat(1), true, "")] // http::Error(InvalidUri(InvalidUriChar))
-    #[case(&" ".repeat(1_000_000), true, "")] // http::Error(InvalidUri(TooLong))
-    #[case(&"a".repeat(1_000_000), true, "")] // http::Error(InvalidUri(TooLong))
+    #[case(&"a".repeat(201), false, 400, "Name")]
+    #[case(&"".repeat(201), false, 404, "")] // 404, since name param can't be picked from empty
+    #[case(&" ".repeat(1), true, 0, "")] // http::Error(InvalidUri(InvalidUriChar))
+    #[case(&" ".repeat(1_000_000), true, 0, "")] // http::Error(InvalidUri(TooLong))
+    #[case(&"a".repeat(1_000_000), true, 0, "")] // http::Error(InvalidUri(TooLong))
     #[tokio::test]
-    async fn test_get_sensor(#[case] name: &str, #[case] invalid_req: bool, #[case] err: &str) {
+    async fn test_get_sensor(#[case] name: &str, #[case] invalid_req: bool, #[case] status: u16, #[case] field: &str) {
         let req = Request::get(format!("/sensors/{name}")).body(Body::empty());
 
         if invalid_req {
@@ -125,29 +125,18 @@ mod tests {
             .await
             .unwrap();
 
-        assert!(response.status().as_u16() > 399);
-        assert_eq!(get_body_string(response).await, err);
+        assert_err(response, status, field).await;
     }
 
     #[rstest]
-    #[case(&"a".repeat(201), 0.0, 0.0, "Input validation error: [name: Must be between 1 and 200]")]
-    #[case("", 0.0, 0.0, "Input validation error: [name: Must be between 1 and 200]")]
-    #[case(
-        "a",
-        f64::MAX,
-        0.0,
-        "Input validation error: [lat: Must be between -90deg and 90deg]"
-    )]
-    #[case("a", -90.1, 0.0, "Input validation error: [lat: Must be between -90deg and 90deg]")]
-    #[case(
-        "a",
-        0.0,
-        f64::MAX,
-        "Input validation error: [long: Must be between -180deg and 180deg]"
-    )]
-    #[case("a", 0.0, -180.1, "Input validation error: [long: Must be between -180deg and 180deg]")]
+    #[case(&"a".repeat(201), 0.0, 0.0, "name")]
+    #[case("", 0.0, 0.0, "name")]
+    #[case("a", f64::MAX, 0.0, "lat")]
+    #[case("a", -90.1, 0.0, "lat")]
+    #[case("a", 0.0, f64::MAX, "long")]
+    #[case("a", 0.0, -180.1, "long")]
     #[tokio::test]
-    async fn test_post_sensors(#[case] name: &str, #[case] lat: f64, #[case] long: f64, #[case] err: &str) {
+    async fn test_post_sensors(#[case] name: &str, #[case] lat: f64, #[case] long: f64, #[case] field: &str) {
         let dto = SensorDto {
             name: name.to_string(),
             lat,
@@ -163,17 +152,16 @@ mod tests {
             .await
             .unwrap();
 
-        assert!(response.status().as_u16() > 399);
-        assert_eq!(get_body_string(response).await, err);
+        assert_err(response, 400, field).await;
     }
 
     #[rstest]
-    #[case(f64::MAX, 0.0, "Input validation error: [lat: Must be between -90deg and 90deg]")]
-    #[case(-90.1, 0.0, "Input validation error: [lat: Must be between -90deg and 90deg]")]
-    #[case(0.0, f64::MAX, "Input validation error: [long: Must be between -180deg and 180deg]")]
-    #[case(0.0, -180.1, "Input validation error: [long: Must be between -180deg and 180deg]")]
+    #[case(f64::MAX, 0.0, "lat")]
+    #[case(-90.1, 0.0, "lat")]
+    #[case(0.0, f64::MAX, "long")]
+    #[case(0.0, -180.1, "long")]
     #[tokio::test]
-    async fn test_put_sensor(#[case] lat: f64, #[case] long: f64, #[case] err: &str) {
+    async fn test_put_sensor(#[case] lat: f64, #[case] long: f64, #[case] field: &str) {
         let body = serde_json::json!({ "lat": lat, "long": long, "tags": {"a": "1"} });
         let req = Request::put("/sensors/a")
             .header("content-type", "application/json")
@@ -184,17 +172,16 @@ mod tests {
             .await
             .unwrap();
 
-        assert!(response.status().as_u16() > 399);
-        assert_eq!(get_body_string(response).await, err);
+        assert_err(response, 400, field).await;
     }
 
     #[rstest]
-    #[case(f64::MAX, 0.0, "Input validation error: [lat: Must be between -90deg and 90deg]")]
-    #[case(-90.1, 0.0, "Input validation error: [lat: Must be between -90deg and 90deg]")]
-    #[case(0.0, f64::MAX, "Input validation error: [long: Must be between -180deg and 180deg]")]
-    #[case(0.0, -180.1, "Input validation error: [long: Must be between -180deg and 180deg]")]
+    #[case(f64::MAX, 0.0, "lat")]
+    #[case(-90.1, 0.0, "lat")]
+    #[case(0.0, f64::MAX, "long")]
+    #[case(0.0, -180.1, "long")]
     #[tokio::test]
-    async fn test_post_nearby(#[case] lat: f64, #[case] long: f64, #[case] err: &str) {
+    async fn test_post_nearby(#[case] lat: f64, #[case] long: f64, #[case] field: &str) {
         let body = serde_json::json!({ "lat": lat, "long": long });
         let req = Request::post("/sensors/nearby")
             .header("content-type", "application/json")
@@ -205,12 +192,19 @@ mod tests {
             .await
             .unwrap();
 
-        assert!(response.status().as_u16() > 399);
-        assert_eq!(get_body_string(response).await, err);
+        assert_err(response, 400, field).await;
     }
 
-    async fn get_body_string(res: Response<Body>) -> String {
+    async fn assert_err(res: Response<Body>, status: u16, field: &str) {
+        assert_eq!(res.status().as_u16(), status);
+
+        if field.is_empty() {
+            return;
+        }
+
         let body = to_bytes(res.into_body(), usize::MAX).await.unwrap();
-        String::from_utf8(body.to_vec()).unwrap()
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+
+        assert!(json["detail"].as_str().unwrap().contains(field), "{json}");
     }
 }

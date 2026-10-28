@@ -1,6 +1,6 @@
 # Spatial
 
-
+Rust Axum REST API with Postgres + PostGIS extension to store and retrieve sensor data, including GeoSpatial index using GiST R-Tree index for nearby sensor search.
 
 ## Run
 
@@ -12,7 +12,7 @@ Requires Docker
 docker compose up
 ```
 
-2. Migartion:
+2. Db Init:
 
 ```bash
 export DATABASE_URL="postgres://postgres:password@localhost/spatial"

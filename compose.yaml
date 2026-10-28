@@ -1,0 +1,12 @@
+services:
+  db:
+    image: postgis/postgis:latest
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_PASSWORD: password
+    volumes:
+      - pgdata:/var/lib/postgresql
+
+volumes:
+  pgdata:
